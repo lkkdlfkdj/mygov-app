@@ -30,11 +30,11 @@ jobs:
       - name: Build APK with Buildozer
         run: |
           export PATH=$PATH:$HOME/.local/bin
-          cd mygov_app
           buildozer android debug 2>&1
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: mygovapp-debug-apk
-          path: mygov_app/bin/*.apk
+          path: bin/*.apk

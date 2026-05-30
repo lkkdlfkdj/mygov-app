@@ -49,7 +49,7 @@ source.exclude_exts = spec,md
 #   2. ultralytics + torch 在Android上需要通过特定方式编译
 #     建议先测试基本功能（不含OCR），确认无问题后再加入OCR
 #   3. opencv-python 在Android上推荐使用 opencv-python-headless
-requirements = python3,kivy==2.3.1,plyer==2.1.0,pillow==10.4.0,zhconv==1.4.3,pandas==3.0.3,fpdf2==2.8.7,openpyxl==3.1.5,paddlepaddle==2.6.2,paddleocr==2.8.1,ultralytics==8.4.56,opencv-python-headless,pyinstaller
+requirements = python3,kivy==2.3.1,plyer==2.1.0,pillow==10.4.0,zhconv==1.4.3,pandas,fpdf2,openpyxl,opencv-python-headless
 
 # ==================== Android 权限配置 ====================
 

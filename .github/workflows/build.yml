@@ -11,33 +11,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache Buildozer
+      - name: Cache .buildozer
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.buildozer
-            .buildozer
+          path: .buildozer
           key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
 
-      - name: Install system dependencies
+      - name: Build APK with kivy/buildozer
         run: |
-          sudo apt update
-          sudo apt install -y python3-pip python3-setuptools python3-dev \
-            git zip unzip openjdk-17-jdk build-essential ccache \
-            autoconf libtool pkg-config zlib1g-dev libncurses5-dev \
-            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev \
-            libltdl-dev
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            -v ${{ github.workspace }}/.buildozer:/buildozer \
+            kivy/buildozer:latest \
+            buildozer android debug 2>&1
 
-      - name: Install Buildozer
-        run: |
-          pip install --upgrade pip setuptools wheel
-          pip install --upgrade buildozer cython virtualenv
-
-      - name: Build APK
-        run: |
-          python -m buildozer android debug 2>&1
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mygovapp-apk
+          path: bin/*.apk

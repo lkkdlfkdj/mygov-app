@@ -16,10 +16,19 @@ YOLOv8 OCR 离线识别引擎
 
 import os
 import sys
-import cv2
-import numpy as np
-from PIL import Image
 import traceback
+
+# OpenCV 可选导入（Android上可能不可用）
+try:
+    import cv2
+    import numpy as np
+    _HAS_OPENCV = True
+except ImportError:
+    _HAS_OPENCV = False
+    cv2 = None
+    np = None
+
+from PIL import Image
 
 # ==================== 繁简转换 ====================
 try:
@@ -159,7 +168,7 @@ class OCREngine:
         """图片加载与预处理
 
         步骤：
-        1. 使用OpenCV加载图片
+        1. 使用OpenCV或Pillow加载图片
         2. 检查图片有效性
         3. 保持宽高比缩放到最大尺寸1200px
         4. 返回处理后的图片
@@ -175,32 +184,42 @@ class OCREngine:
                 if not os.path.exists(image_path):
                     print(f"[OCREngine] 图片不存在: {image_path}")
                     return None, None
-                img = cv2.imread(image_path)
-            elif isinstance(image_path, np.ndarray):
-                img = image_path
+
+            if _HAS_OPENCV:
+                if isinstance(image_path, str):
+                    img = cv2.imread(image_path)
+                elif isinstance(image_path, np.ndarray):
+                    img = image_path
+                else:
+                    print(f"[OCREngine] 不支持的图片类型: {type(image_path)}")
+                    return None, None
+
+                if img is None:
+                    print(f"[OCREngine] 图片加载失败: {image_path}")
+                    return None, None
+
+                h, w = img.shape[:2]
+                max_dim = 1200
+                if max(h, w) > max_dim:
+                    scale = max_dim / max(h, w)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    img = cv2.resize(img, (new_w, new_h),
+                                     interpolation=cv2.INTER_AREA)
+
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_pil = Image.fromarray(img_rgb)
+                return img, img_pil
             else:
-                print(f"[OCREngine] 不支持的图片类型: {type(image_path)}")
-                return None, None
-
-            if img is None:
-                print(f"[OCREngine] 图片加载失败: {image_path}")
-                return None, None
-
-            # 保持宽高比缩放
-            h, w = img.shape[:2]
-            max_dim = 1200
-            if max(h, w) > max_dim:
-                scale = max_dim / max(h, w)
-                new_w = int(w * scale)
-                new_h = int(h * scale)
-                img = cv2.resize(img, (new_w, new_h),
-                                 interpolation=cv2.INTER_AREA)
-
-            # 转换颜色空间 BGR→RGB
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_pil = Image.fromarray(img_rgb)
-
-            return img, img_pil
+                img_pil = Image.open(image_path).convert('RGB')
+                w, h = img_pil.size
+                max_dim = 1200
+                if max(h, w) > max_dim:
+                    scale = max_dim / max(h, w)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                return img_pil, img_pil
 
         except Exception as e:
             print(f"[OCREngine] 图片预处理失败: {e}")

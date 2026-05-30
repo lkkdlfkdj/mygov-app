@@ -9,14 +9,20 @@ version.code = 1
 
 # ==================== 源代码配置 ====================
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,gif,ttf,ttc,txt,json,db,pt
+source.include_exts = py,png,jpg,jpeg,gif,ttf,ttc,txt,json,db,java,ipynb
 source.exclude_dirs = __pycache__, .git, .github
 source.exclude_exts = spec,md
 
 # ==================== 依赖库 ====================
-# 注意：paddlepaddle / paddleocr / ultralytics / opencv-python
-# 在 Android 交叉编译环境下不可用，已移除
-requirements = python3,kivy,plyer,pillow,zhconv,pandas,fpdf2,openpyxl,numpy
+# Android OCR: 使用 ML Kit Text Recognition（Google 移动端本地OCR）
+# 已移除无法交叉编译的 paddlepaddle / paddleocr / ultralytics / opencv-python
+requirements = python3,kivy,plyer,pillow,zhconv,pandas,fpdf2,openpyxl,numpy,pyjnius
+
+# ML Kit 文字识别（Google 本地OCR，零联网，全离线）
+android.gradle_dependencies = com.google.mlkit:text-recognition:16.0.0
+
+# 自定义 Java 源码目录（如需要Java辅助类）
+# android.add_src = java/
 
 # ==================== Android 权限 ====================
 # 注意：不包含 INTERNET 权限（零联网要求）

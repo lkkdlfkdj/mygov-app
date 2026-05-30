@@ -1,25 +1,13 @@
-"""
-OCR 识别引擎（移动端轻量版）
-纯本地运行，零API、零联网
-
-注意：Android 移动端不支持 paddlepaddle/paddleocr/ultralytics 等深度学习OCR库。
-本模块提供轻量降级方案：返回空结果，引导用户手动输入。
-保留了文本后处理工具（繁→简转换、纠错）供其他模块使用。
-"""
-
 import os
-import traceback
 import re
-
+import time as time_module
 from PIL import Image
 
-# ==================== 繁简转换 ====================
 try:
     from zhconv import convert as zhconv_convert
     _HAS_ZHCOnv = True
 except ImportError:
     _HAS_ZHCOnv = False
-
     _FALLBACK_TABLE = {
         '體': '体', '為': '为', '會': '会', '與': '与', '時': '时',
         '從': '从', '來': '来', '寫': '写', '對': '对', '說': '说',
@@ -45,7 +33,6 @@ except ImportError:
         '長': '长', '陽': '阳', '陰': '阴', '邊': '边', '還': '还',
         '進': '进', '過': '过', '這': '这', '種': '种', '樣': '样',
     }
-
     def zhconv_convert(text, _):
         result = []
         for ch in text:
@@ -53,30 +40,52 @@ except ImportError:
         return ''.join(result)
 
 
+_ANDROID = False
+try:
+    from jnius import autoclass
+    _ANDROID = True
+except ImportError:
+    pass
+
+
 class OCREngine:
-    """OCR识别引擎（移动端轻量版）
-    保持与旧版相同的接口，但实际OCR功能降级。
-    """
+    """OCR识别引擎 - Android端使用ML Kit，桌面端返回提示"""
 
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
+        if hasattr(self, '_initialized'):
             return
         self._initialized = True
         self._model_loaded = False
+        self._mlkit_classes = None
+
+        if _ANDROID:
+            self._init_mlkit()
+
+    def _init_mlkit(self):
+        try:
+            self.TextRecognition = autoclass('com.google.mlkit.vision.text.TextRecognition')
+            self.InputImage = autoclass('com.google.mlkit.vision.common.InputImage')
+            self.BitmapFactory = autoclass('android.graphics.BitmapFactory')
+            try:
+                self.Tasks = autoclass('com.google.android.gms.tasks.Tasks')
+            except Exception:
+                self.Tasks = None
+            self._model_loaded = True
+        except Exception as e:
+            print(f"[OCR] ML Kit init failed: {e}")
 
     def is_ready(self):
         return self._model_loaded
 
     def _ensure_models(self):
-        return False
+        return self._model_loaded
 
     def preprocess(self, image_path):
         try:
@@ -113,23 +122,100 @@ class OCREngine:
                 text = text.replace(wrong, correct)
         return text
 
+    def _run_mlkit_ocr(self, image_path):
+        """调用ML Kit进行文字识别"""
+        try:
+            bitmap = self.BitmapFactory.decodeFile(image_path)
+            if bitmap is None:
+                return None, '无法解码图片文件'
+
+            input_image = self.InputImage.fromBitmap(bitmap, 0)
+            recognizer = self.TextRecognition.getClient()
+            task = recognizer.process(input_image)
+
+            if self.Tasks:
+                text_result = self.Tasks.await(task)
+            else:
+                while not task.isComplete():
+                    time_module.sleep(0.05)
+                text_result = task.getResult()
+
+            if text_result is None:
+                return None, 'OCR未识别到文字'
+
+            return text_result, ''
+        except Exception as e:
+            return None, str(e)
+
     def ocr_text(self, image_path):
+        """通用文字识别"""
+        if not _ANDROID:
+            return {
+                'success': False,
+                'texts': [],
+                'full_text': '',
+                'layout': [],
+                'error': 'OCR功能仅在Android设备上可用',
+            }
+        if not self._model_loaded:
+            return {
+                'success': False,
+                'texts': [],
+                'full_text': '',
+                'layout': [],
+                'error': 'ML Kit未初始化',
+            }
+
+        text_result, error = self._run_mlkit_ocr(image_path)
+        if error or text_result is None:
+            return {
+                'success': False,
+                'texts': [],
+                'full_text': '',
+                'layout': [],
+                'error': error or 'OCR未识别到文字',
+            }
+
+        full_text = text_result.getText() or ''
+        texts = []
+        layout = []
+
+        blocks = text_result.getTextBlocks()
+        if blocks:
+            for i in range(blocks.size()):
+                block = blocks.get(i)
+                block_text = block.getText()
+                if block_text:
+                    texts.append(block_text)
+                    box = block.getBoundingBox()
+                    layout.append({
+                        'text': block_text,
+                        'x': box.left if box else 0,
+                        'y': box.top if box else 0,
+                        'w': box.width() if box else 0,
+                        'h': box.height() if box else 0,
+                    })
+
+        full_text = self.postprocess(full_text, 'text')
+        texts = [self.postprocess(t, 'text') for t in texts]
+
         return {
-            'success': False,
-            'texts': [],
-            'full_text': '',
-            'layout': [],
-            'error': 'OCR功能在移动端不可用，请手动输入',
+            'success': True,
+            'texts': texts,
+            'full_text': full_text,
+            'layout': layout,
+            'error': '',
         }
 
     def ocr_numbers(self, image_path):
-        return {
-            'success': False,
-            'numbers': [],
-            'full_text': '',
-            'texts': [],
-            'error': 'OCR功能在移动端不可用，请手动输入',
-        }
+        """识别图片中的数字编号"""
+        result = self.ocr_text(image_path)
+        if result['success'] and result['full_text']:
+            numbers = re.findall(r'\d+', result['full_text'])
+            result['numbers'] = [self.postprocess(n, 'number') for n in numbers]
+        else:
+            result['numbers'] = []
+        return result
 
     def analyze_layout(self, image_np):
         return []

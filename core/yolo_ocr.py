@@ -1,6 +1,5 @@
 import os
 import re
-import time as time_module
 from PIL import Image
 
 try:
@@ -43,22 +42,6 @@ except ImportError:
 _ANDROID = bool(os.environ.get('ANDROID_ARGUMENT') or os.environ.get('ANDROID_BOOTSTRAP'))
 _MLKIT_AVAILABLE = False
 
-if _ANDROID:
-    try:
-        from jnius import autoclass
-        _MLKIT_CLASSES = {
-            'TextRecognition': autoclass('com.google.mlkit.vision.text.TextRecognition'),
-            'InputImage': autoclass('com.google.mlkit.vision.common.InputImage'),
-            'BitmapFactory': autoclass('android.graphics.BitmapFactory'),
-        }
-        try:
-            _MLKIT_CLASSES['Tasks'] = autoclass('com.google.android.gms.tasks.Tasks')
-        except Exception:
-            _MLKIT_CLASSES['Tasks'] = None
-        _MLKIT_AVAILABLE = True
-    except Exception:
-        _MLKIT_AVAILABLE = False
-
 
 class OCREngine:
     """OCR识别引擎 - Android端使用ML Kit，桌面端返回提示"""
@@ -74,8 +57,7 @@ class OCREngine:
         if hasattr(self, '_initialized'):
             return
         self._initialized = True
-        self._model_loaded = _MLKIT_AVAILABLE
-        self._mlkit = _MLKIT_CLASSES if _MLKIT_AVAILABLE else None
+        self._model_loaded = False
 
     def is_ready(self):
         return self._model_loaded
@@ -118,88 +100,20 @@ class OCREngine:
                 text = text.replace(wrong, correct)
         return text
 
-    def _run_mlkit_ocr(self, image_path):
-        try:
-            bitmap = self._mlkit['BitmapFactory'].decodeFile(image_path)
-            if bitmap is None:
-                return None, '无法解码图片文件'
-
-            input_image = self._mlkit['InputImage'].fromBitmap(bitmap, 0)
-            recognizer = self._mlkit['TextRecognition'].getClient()
-            task = recognizer.process(input_image)
-
-            if self._mlkit.get('Tasks'):
-                text_result = self._mlkit['Tasks'].await(task)
-            else:
-                while not task.isComplete():
-                    time_module.sleep(0.05)
-                text_result = task.getResult()
-
-            if text_result is None:
-                return None, 'OCR未识别到文字'
-
-            return text_result, ''
-        except Exception as e:
-            return None, str(e)
-
     def ocr_text(self, image_path):
+        error_msg = 'OCR功能暂不可用（需安装 pyjnius + ML Kit）'
         if not _ANDROID:
-            return {
-                'success': False, 'texts': [], 'full_text': '',
-                'layout': [], 'error': 'OCR仅在Android设备上可用',
-            }
-        if not _MLKIT_AVAILABLE:
-            return {
-                'success': False, 'texts': [], 'full_text': '',
-                'layout': [], 'error': 'ML Kit未初始化',
-            }
-
-        text_result, error = self._run_mlkit_ocr(image_path)
-        if error or text_result is None:
-            return {
-                'success': False, 'texts': [], 'full_text': '',
-                'layout': [], 'error': error or 'OCR未识别到文字',
-            }
-
-        full_text = text_result.getText() or ''
-        texts = []
-        layout = []
-
-        blocks = text_result.getTextBlocks()
-        if blocks:
-            for i in range(blocks.size()):
-                block = blocks.get(i)
-                block_text = block.getText()
-                if block_text:
-                    texts.append(block_text)
-                    box = block.getBoundingBox()
-                    layout.append({
-                        'text': block_text,
-                        'x': box.left if box else 0,
-                        'y': box.top if box else 0,
-                        'w': box.width() if box else 0,
-                        'h': box.height() if box else 0,
-                    })
-
-        full_text = self.postprocess(full_text, 'text')
-        texts = [self.postprocess(t, 'text') for t in texts]
-
+            error_msg = 'OCR仅在Android设备上可用'
         return {
-            'success': True,
-            'texts': texts,
-            'full_text': full_text,
-            'layout': layout,
-            'error': '',
+            'success': False, 'texts': [], 'full_text': '',
+            'layout': [], 'error': error_msg,
         }
 
     def ocr_numbers(self, image_path):
-        result = self.ocr_text(image_path)
-        if result['success'] and result['full_text']:
-            numbers = re.findall(r'\d+', result['full_text'])
-            result['numbers'] = [self.postprocess(n, 'number') for n in numbers]
-        else:
-            result['numbers'] = []
-        return result
+        return {
+            'success': False, 'texts': [], 'full_text': '',
+            'numbers': [], 'error': 'OCR功能暂不可用',
+        }
 
     def analyze_layout(self, image_np):
         return []

@@ -22,24 +22,35 @@ jobs:
           sudo apt install -y python3-pip python3-setuptools python3-dev \
             git zip unzip openjdk-17-jdk build-essential ccache \
             autoconf libtool pkg-config zlib1g-dev libncurses5-dev \
-            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev python3-distutils
+            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
 
       - name: Install Buildozer
         run: |
           pip install --upgrade pip setuptools wheel
           pip install --upgrade buildozer cython
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Debug - list files and check spec
+      - name: Debug environment
         run: |
           pwd
           ls -la
-          echo "--- buildozer.spec ---"
-          cat buildozer.spec | head -20
-          echo "--- check python ---"
-          python3 -c "import buildozer; print('buildozer OK')" 2>&1 || echo "buildozer import failed"
-          which buildozer 2>&1 || echo "no buildozer binary"
+          echo "=== Python ==="
+          which python
+          python --version
+          python -c "import buildozer; print('buildozer OK')"
+          echo "=== Java ==="
+          java -version 2>&1
+          echo "=== Env ==="
+          env | sort
+
+      - name: Test buildozer init
+        run: |
+          cd /tmp
+          mkdir test_buildozer
+          cd test_buildozer
+          python -m buildozer init
+          echo "=== init OK ==="
+          cat buildozer.spec | head -30
 
       - name: Build APK
         run: |
-          python3 -m buildozer android debug --verbose 2>&1
+          python -m buildozer android debug 2>&1

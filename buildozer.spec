@@ -14,7 +14,7 @@ source.exclude_dirs = __pycache__, .git, .github
 source.exclude_exts = spec,md
 
 # ==================== 依赖库 ====================
-requirements = python3,kivy==2.3.1,plyer==2.1.0,pillow==10.4.0,zhconv==1.4.3,pandas,fpdf2,openpyxl
+requirements = python3,kivy,plyer,pillow,zhconv,pandas,fpdf2,openpyxl
 
 # ==================== Android 权限 ====================
 # 注意：不包含 INTERNET 权限（零联网要求）

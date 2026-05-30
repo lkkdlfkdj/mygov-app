@@ -46,20 +46,41 @@ jobs:
           python --version
           buildozer --version 2>&1 || true
 
+      - name: Diagnose buildozer
+        run: |
+          echo "=== pwd ==="
+          pwd
+          echo "=== buildozer.spec exists ==="
+          test -f buildozer.spec && echo "YES" || echo "NO"
+          echo "=== python ==="
+          which python && python --version
+          echo "=== buildozer ==="
+          which buildozer 2>/dev/null || echo "no buildozer"
+          echo "=== contents ==="
+          ls -la
+
       - name: Build APK
         run: |
           python -m buildozer android debug 2>&1 | tee build_log.txt
+          echo "EXIT_CODE=$?" >> $GITHUB_ENV
 
-      - name: Upload log on failure
-        if: failure()
+      - name: Print build log tail
+        if: success() || failure()
+        run: |
+          echo "=== build_log.txt ==="
+          cat build_log.txt 2>/dev/null || echo "no log"
+          echo "=== bin/ ==="
+          ls -la bin/ 2>/dev/null || echo "no bin/"
+          echo "=== .buildozer/ ==="
+          ls -la .buildozer/ 2>/dev/null || echo "no .buildozer/"
+          echo "=== find apks ==="
+          find . -name "*.apk" 2>/dev/null || echo "no apk files"
+          echo "=== build.log ==="
+          find .buildozer -name "build.log" 2>/dev/null -exec head -100 {} \;
+
+      - name: Upload build log
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build_log.txt
-
-      - name: Upload APK on success
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mygovapp-apk
-          path: bin/*.apk

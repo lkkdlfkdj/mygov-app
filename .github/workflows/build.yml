@@ -16,40 +16,27 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Cache Buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+
       - name: Install system dependencies
         run: |
           sudo apt update
           sudo apt install -y python3-pip python3-setuptools python3-dev \
             git zip unzip openjdk-17-jdk build-essential ccache \
             autoconf libtool pkg-config zlib1g-dev libncurses5-dev \
-            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev \
+            libltdl-dev
 
       - name: Install Buildozer
         run: |
           pip install --upgrade pip setuptools wheel
-          pip install --upgrade buildozer cython
-
-      - name: Debug environment
-        run: |
-          pwd
-          ls -la
-          echo "=== Python ==="
-          which python
-          python --version
-          python -c "import buildozer; print('buildozer OK')"
-          echo "=== Java ==="
-          java -version 2>&1
-          echo "=== Env ==="
-          env | sort
-
-      - name: Test buildozer init
-        run: |
-          cd /tmp
-          mkdir test_buildozer
-          cd test_buildozer
-          python -m buildozer init
-          echo "=== init OK ==="
-          cat buildozer.spec | head -30
+          pip install --upgrade buildozer cython virtualenv
 
       - name: Build APK
         run: |

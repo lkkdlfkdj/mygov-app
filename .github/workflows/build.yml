@@ -21,13 +21,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Cache Buildozer global
+      - name: Cache Buildozer (SDK/NDK)
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: ${{ runner.os }}-buildozer-global-${{ hashFiles('buildozer.spec') }}
+          key: ${{ runner.os }}-buildozer-sdk-1
 
-      - name: Install system dependencies
+      - name: Install system deps
         run: |
           sudo apt update
           sudo apt install -y python3-pip python3-setuptools python3-dev \
@@ -40,31 +40,26 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install buildozer cython virtualenv
 
+      - name: Show versions
+        run: |
+          java -version 2>&1
+          python --version
+          buildozer --version 2>&1 || true
+
       - name: Build APK
         run: |
           python -m buildozer android debug 2>&1 | tee build_log.txt
-          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
 
-      - name: Upload build output
-        if: success() || failure()
+      - name: Upload log on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-output
-          path: |
-            build_log.txt
-            .buildozer/android/platform/build-*/build.log
-          if-no-files-found: warn
+          name: build-log
+          path: build_log.txt
 
-      - name: List APK
-        if: success()
-        run: |
-          ls -la bin/ 2>/dev/null || echo "bin/ not found"
-          find . -name "*.apk" 2>/dev/null || echo "no apk found"
-
-      - name: Upload APK
+      - name: Upload APK on success
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: mygovapp-apk
           path: bin/*.apk
-          if-no-files-found: error

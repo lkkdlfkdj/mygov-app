@@ -11,22 +11,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache .buildozer
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Buildozer
         uses: actions/cache@v4
         with:
-          path: .buildozer
+          path: |
+            ~/.buildozer
+            .buildozer
           key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
 
-      - name: Build APK with kivy/buildozer
+      - name: Install system dependencies
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/app \
-            -v ${{ github.workspace }}/.buildozer:/buildozer \
-            kivy/buildozer:latest \
-            buildozer android debug 2>&1
+          sudo apt update
+          sudo apt install -y python3-pip python3-setuptools python3-dev \
+            git zip unzip build-essential ccache autoconf libtool \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo5 cmake libffi-dev libssl-dev libltdl-dev
 
-      - name: Upload APK
+      - name: Install Buildozer
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install buildozer cython virtualenv
+
+      - name: Debug environment
+        run: |
+          java -version 2>&1
+          python --version
+          which buildozer
+          pip list | grep buildozer
+
+      - name: Build APK
+        run: |
+          export BUILDozER_CMD='buildozer android debug 2>&1'
+          echo "Starting buildozer build..."
+          python -m buildozer android debug 2>&1 | tee buildozer_output.log
+          echo "Build completed with exit code ${PIPESTATUS[0]}"
+
+      - name: Upload build logs
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: mygovapp-apk
-          path: bin/*.apk
+          name: buildozer-logs
+          path: |
+            buildozer_output.log
+            .buildozer/android/platform/build-*/build.log
+            bin/*.apk
+          if-no-files-found: warn

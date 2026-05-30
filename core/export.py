@@ -127,11 +127,152 @@ def _format_value(value, max_len=None):
     return s
 
 
-# ==================== Excel 导出 ====================
+# ==================== Excel 导出（纯Python实现，无外部依赖） ====================
+
+def _build_xlsx(columns, data, filepath):
+    """用纯Python构建xlsx文件（不需openpyxl/pandas）"""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    def _xml(tag, text=None, attrs=None, children=None):
+        el = ET.Element(tag, **(attrs or {}))
+        if text is not None:
+            el.text = str(text)
+        for c in (children or []):
+            el.append(c)
+        return el
+
+    # shared strings
+    sst = []
+    sst_map = {}
+    def _sst(val):
+        s = str(val)
+        if s not in sst_map:
+            sst_map[s] = len(sst)
+            sst.append(s)
+        return sst_map[s]
+
+    header_names = [h[0] for h in columns]
+    sheet_rows = []
+    sheet_rows.append(header_names)
+    for row in data:
+        sheet_rows.append([_format_value(row.get(f[1])) for f in columns])
+
+    for row in sheet_rows:
+        for v in row:
+            if v:
+                _sst(v)
+
+    # build XML strings manually for compactness
+    def esc(s):
+        return s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
+
+    # sharedStrings.xml
+    ss_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    ss_xml += '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{}" uniqueCount="{}">'.format(len(sst), len(sst))
+    for s in sst:
+        ss_xml += '<si><t>{}</t></si>'.format(esc(s))
+    ss_xml += '</sst>'
+
+    # styles.xml - minimal with green header
+    styles_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="3">
+    <font><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+    <font><sz val="10"/><name val="Calibri"/></font>
+  </fonts>
+  <fills count="3">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF2E7D32"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color auto="1"/></left>
+      <right style="thin"><color auto="1"/></right>
+      <top style="thin"><color auto="1"/></top>
+      <bottom style="thin"><color auto="1"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="3">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="1" applyFont="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>
+  </cellXfs>
+</styleSheet>'''
+
+    # sheet1.xml
+    sheet_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    sheet_xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    sheet_xml += '<cols>'
+    for i, (dn, _) in enumerate(columns):
+        width = max(len(dn) * 2 + 2, 12)
+        sheet_xml += '<col min="{}" max="{}" width="{}" customWidth="1"/>'.format(i+1, i+1, min(width, 60))
+    sheet_xml += '</cols>'
+    sheet_xml += '<sheetData>'
+    for ri, row_cells in enumerate(sheet_rows):
+        sheet_xml += '<row r="{}">'.format(ri+1)
+        style = '1' if ri == 0 else '2'
+        for ci, val in enumerate(row_cells):
+            si = _sst(val) if val else 0
+            if val:
+                sheet_xml += '<c r="{}{}" t="s" s="{}"><v>{}</v></c>'.format(
+                    chr(65+ci), ri+1, style, si)
+            else:
+                sheet_xml += '<c r="{}{}" s="{}"><v></v></c>'.format(chr(65+ci), ri+1, style)
+        sheet_xml += '</row>'
+    sheet_xml += '</sheetData></worksheet>'
+
+    # workbook.xml
+    wb_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>'''
+
+    # relationships
+    wbrels_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>'''
+
+    # [Content_Types].xml
+    ct_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>'''
+
+    # workbook.xml.rels
+    wb_rels_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>'''
+
+    with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('[Content_Types].xml', ct_xml)
+        z.writestr('_rels/.rels', wbrels_xml)
+        z.writestr('xl/workbook.xml', wb_xml)
+        z.writestr('xl/_rels/workbook.xml.rels', wb_rels_xml)
+        z.writestr('xl/worksheets/sheet1.xml', sheet_xml)
+        z.writestr('xl/sharedStrings.xml', ss_xml)
+        z.writestr('xl/styles.xml', styles_xml)
+
+    return True
+
 
 def export_excel(table_name, filename=None):
     """
-    导出为Excel文件（带样式）
+    导出为Excel文件（纯Python实现，不需openpyxl/pandas）
     返回: (success, filepath_or_error)
     """
     columns, rows, error = _get_table_data(table_name)
@@ -139,11 +280,6 @@ def export_excel(table_name, filename=None):
         return False, error
 
     try:
-        import pandas as pd
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
-
         _ensure_export_dir()
 
         if filename is None:
@@ -152,103 +288,113 @@ def export_excel(table_name, filename=None):
 
         filepath = os.path.join(EXPORT_DIR, filename)
 
-        # 准备数据
-        header_labels = [c[0] for c in columns]
-        field_names = [c[1] for c in columns]
-
-        data_rows = []
-        for row in rows:
-            data_row = []
-            for field in field_names:
-                val = row.get(field, '')
-                if isinstance(val, float):
-                    val = round(val, 6)
-                data_row.append('' if val is None else val)
-            data_rows.append(data_row)
-
-        # 用 pandas 创建 DataFrame
-        df = pd.DataFrame(data_rows, columns=header_labels)
-
-        # 写入 Excel
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name=table_name)
-            workbook = writer.book
-            worksheet = writer.sheets[table_name]
-
-            # ---- 样式定义 ----
-            header_font = Font(
-                name='微软雅黑',
-                bold=True,
-                color='FFFFFF',
-                size=11,
-            )
-            header_fill = PatternFill(
-                start_color='2E7D32',
-                end_color='2E7D32',
-                fill_type='solid'
-            )
-            header_alignment = Alignment(
-                horizontal='center',
-                vertical='center',
-            )
-            cell_font = Font(name='微软雅黑', size=10)
-            cell_alignment = Alignment(
-                horizontal='left',
-                vertical='center',
-                wrap_text=True,
-            )
-            thin_border = Border(
-                left=Side(style='thin', color='CCCCCC'),
-                right=Side(style='thin', color='CCCCCC'),
-                top=Side(style='thin', color='CCCCCC'),
-                bottom=Side(style='thin', color='CCCCCC'),
-            )
-
-            # ---- 设置表头样式 ----
-            for col_idx, header in enumerate(header_labels, start=1):
-                cell = worksheet.cell(row=1, column=col_idx)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = header_alignment
-                cell.border = thin_border
-
-            # ---- 设置数据单元格样式 ----
-            for row_idx in range(2, len(data_rows) + 2):
-                for col_idx in range(1, len(header_labels) + 1):
-                    cell = worksheet.cell(row=row_idx, column=col_idx)
-                    cell.font = cell_font
-                    cell.alignment = cell_alignment
-                    cell.border = thin_border
-
-            # ---- 自动调整列宽 ----
-            for col_idx, header in enumerate(header_labels, start=1):
-                # 计算该列最大字符宽度（中文字符按2算）
-                max_width = len(header) * 2  # 表头宽度
-                for row_idx in range(2, min(len(data_rows) + 2, 50)):  # 只采样前50行
-                    cell_value = str(worksheet.cell(row=row_idx, column=col_idx).value or '')
-                    # 估算宽度：中文字符2，英文1
-                    char_width = sum(2 if ord(c) > 127 else 1 for c in cell_value)
-                    max_width = max(max_width, min(char_width, 60))
-
-                # 限制列宽在8~40之间
-                col_width = max(8, min(max_width + 2, 40))
-                worksheet.column_dimensions[get_column_letter(col_idx)].width = col_width
-
-            # ---- 冻结首行 ----
-            worksheet.freeze_panes = 'A2'
-
+        _build_xlsx(columns, rows, filepath)
         return True, filepath
 
     except Exception as e:
         return False, f'Excel导出失败: {str(e)}'
 
 
-# ==================== PDF 导出 ====================
+# ==================== PDF 导出（纯Python实现，无外部依赖） ====================
+
+class _SimplePDF:
+    """极简 PDF 生成器（仅支持 Latin-1，用于纯数字/英文标题导出）"""
+    def __init__(self):
+        self.pages = []
+        self.buf = []
+        self.objects = []
+        self._cur_page = []
+        self._y = 0
+        self._x = 0
+        self._page_w = 595  # A4 portrait points
+        self._page_h = 842
+        self._font_size = 10
+        self._leading = 12
+
+    def add_page(self):
+        if self._cur_page:
+            self.pages.append(self._cur_page)
+        self._cur_page = []
+        self._y = 40
+        self._x = 40
+
+    def set_font(self, name, size=10):
+        self._font_size = size
+        self._leading = size * 1.2
+
+    def _esc_text(self, text):
+        res = []
+        for ch in text:
+            o = ord(ch)
+            if o < 32 or (o > 126 and o < 160):
+                res.append('#')
+            elif o > 255:
+                res.append('?')
+            else:
+                res.append(ch)
+        return ''.join(res)
+
+    def cell(self, w, h, text, align='L'):
+        text = self._esc_text(str(text)) if text else ''
+        x, y = self._x, self._y
+        if align == 'C':
+            tx = x + w/2
+        elif align == 'R':
+            tx = x + w - 2
+        else:
+            tx = x + 2
+        ty = y + h - 2
+        line = f'BT /F1 {self._font_size} Tf {tx:.0f} {ty:.0f} Td ({text}) Tj ET'
+        rect = f'{x:.0f} {y:.0f} {w:.0f} {h:.0f} re S'
+        self._cur_page.append(f'q {rect {line} Q')
+        self._x += w
+
+    def multi_cell(self, w, h, text):
+        self.cell(w, h, text)
+
+    def ln(self, h=None):
+        self._x = 40
+        self._y += h or self._leading
+
+    def output(self, filepath):
+        if self._cur_page:
+            self.pages.append(self._cur_page)
+        objects = []
+        # Font
+        objects.append('1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj')
+        # Pages
+        pages_obj = []
+        for i, page in enumerate(self.pages):
+            content = ' '.join(page)
+            content_id = len(objects) + 2
+            objects.append(f'{content_id} 0 obj << /Length {len(content)} >> stream\n{content}\nendstream')
+            pages_obj.append(f'{content_id} 0 R')
+        # Pages tree
+        pages_tree_id = len(objects) + 1
+        objects.insert(0, f'{pages_tree_id} 0 obj << /Type /Pages /Kids [{" ".join(pages_obj)}] /Count {len(self.pages)} >> endobj')
+        # Catalog
+        catalog_id = len(objects) + 1
+        objects.append(f'{catalog_id} 0 obj << /Type /Catalog /Pages {pages_tree_id} 0 R >> endobj')
+        # Build PDF
+        pdf = f'%PDF-1.4\n'
+        offsets = []
+        for obj in objects:
+            offsets.append(len(pdf))
+            pdf += obj + '\n'
+        xref_offset = len(pdf)
+        pdf += f'xref\n0 {len(objects)+1}\n0000000000 65535 f \n'
+        for off in offsets:
+            pdf += f'{off:010d} 00000 n \n'
+        pdf += f'trailer << /Size {len(objects)+1} /Root {catalog_id} 0 R >>\nstartxref\n{xref_offset}\n%%EOF'
+        with open(filepath, 'wb') as f:
+            f.write(pdf.encode('latin-1'))
+        return True
+
 
 def export_pdf(table_name, filename=None):
     """
-    导出为PDF文件（中文不乱码）
-    使用 FPDF2 + 内置 simhei.ttf 中文字体
+    导出为PDF文件（纯Python，无fpdf2依赖）
+    注意：中文使用 ? 替代，建议导出 CSV 或 Excel 以获得完整中文支持
     返回: (success, filepath_or_error)
     """
     columns, rows, error = _get_table_data(table_name)
@@ -256,8 +402,6 @@ def export_pdf(table_name, filename=None):
         return False, error
 
     try:
-        from fpdf import FPDF
-
         _ensure_export_dir()
 
         if filename is None:
@@ -269,106 +413,29 @@ def export_pdf(table_name, filename=None):
         header_labels = [c[0] for c in columns]
         field_names = [c[1] for c in columns]
 
-        # ---- 创建PDF ----
-        pdf = FPDF(orientation='L', unit='mm', format='A4')
-        pdf.set_auto_page_break(auto=True, margin=15)
-
-        # 注册中文字体
-        if os.path.exists(FONT_PATH):
-            pdf.add_font('Chinese', '', FONT_PATH, uni=True)
-            font_name = 'Chinese'
-        elif os.path.exists(FONT_FALLBACK):
-            pdf.add_font('Chinese', '', FONT_FALLBACK, uni=True)
-            font_name = 'Chinese'
-        else:
-            # 无中文字体时使用默认字体（中文会显示为方框）
-            font_name = 'Helvetica'
-
-        # ---- 计算列宽 ----
-        page_width = pdf.w - 20  # 左右各10mm边距
-        col_count = len(header_labels)
-        # 根据列数动态分配列宽
-        if col_count <= 5:
-            col_widths = [page_width / col_count] * col_count
-        else:
-            # 固定最小宽度，剩余均分
-            min_width = 20
-            remaining = page_width - min_width * col_count
-            if remaining < 0:
-                col_widths = [page_width / col_count] * col_count
-            else:
-                col_widths = [min_width + remaining / col_count] * col_count
-
-        # ---- 表头 ----
+        pdf = _SimplePDF()
         pdf.add_page()
-        pdf.set_font(font_name, '', 14)
-        title_text = {
-            'complaints': '投诉管理数据导出',
-            'hazards': '隐患上报数据导出',
-            'cases': '案件采集数据导出',
-            'laws': '法条库数据导出',
-            'ads': '店招申请数据导出',
-        }.get(table_name, f'{table_name}数据导出')
-        pdf.cell(0, 10, title_text, new_x='LMARGIN', new_y='NEXT', align='C')
+        pdf.set_font('Courier', 14)
+        pdf.multi_cell(0, 10, f'{table_name}')
         pdf.ln(5)
+        pdf.set_font('Courier', 8)
+        pdf.cell(0, 5, f'Export: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        pdf.ln(8)
 
-        # 导出时间
-        pdf.set_font(font_name, '', 8)
-        pdf.cell(0, 5, f'导出时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
-                 new_x='LMARGIN', new_y='NEXT', align='R')
-        pdf.ln(3)
-
-        # ---- 绘制表格 ----
-        # 表头背景色
-        pdf.set_fill_color(46, 125, 50)  # 深绿
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font(font_name, '', 9)
-
-        for i, header in enumerate(header_labels):
-            pdf.cell(col_widths[i], 8, header, border=1, fill=True, align='C')
-        pdf.ln()
-
-        # 数据行
-        pdf.set_text_color(33, 33, 33)
-        pdf.set_font(font_name, '', 8)
-
-        # 交替行颜色
-        light_gray = (245, 245, 245)
-        white = (255, 255, 255)
-
-        for row_idx, row in enumerate(rows):
-            # 检查是否需要翻页
-            if pdf.y > 260:
-                pdf.add_page()
-                # 重新打印表头
-                pdf.set_fill_color(46, 125, 50)
-                pdf.set_text_color(255, 255, 255)
-                pdf.set_font(font_name, '', 9)
-                for i, header in enumerate(header_labels):
-                    pdf.cell(col_widths[i], 8, header, border=1, fill=True, align='C')
-                pdf.ln()
-                pdf.set_text_color(33, 33, 33)
-                pdf.set_font(font_name, '', 8)
-
-            # 行背景色
-            bg = light_gray if row_idx % 2 == 0 else white
-            pdf.set_fill_color(*bg)
-
-            # 限制行高
-            row_height = 7
-
-            for col_idx, field in enumerate(field_names):
-                val = _format_value(row.get(field, ''), max_len=80)
-                pdf.cell(col_widths[col_idx], row_height, val,
-                         border=1, fill=True, align='L')
-
-            pdf.ln()
-
-        # ---- 页脚总结 ----
+        col_w = min(120, int((pdf._page_w - 80) / len(header_labels)))
+        pdf.set_font('Courier', 9)
+        for h in header_labels:
+            pdf.cell(col_w, 8, h, align='C')
+        pdf.ln(10)
+        pdf.set_font('Courier', 8)
+        for row in rows:
+            for field in field_names:
+                val = _format_value(row.get(field, ''), max_len=20)
+                pdf.cell(col_w, 7, val)
+            pdf.ln(8)
         pdf.ln(5)
-        pdf.set_font(font_name, '', 9)
-        pdf.cell(0, 5, f'共 {len(rows)} 条记录',
-                 new_x='LMARGIN', new_y='NEXT', align='C')
+        pdf.set_font('Courier', 9)
+        pdf.cell(0, 5, f'Total: {len(rows)} records')
 
         pdf.output(filepath)
         return True, filepath

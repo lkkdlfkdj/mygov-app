@@ -5,22 +5,53 @@ on:
     branches: [main]
 
 jobs:
-  build-android:
-    name: Build for Android
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          workdir: .
-          buildozer_version: stable
+          distribution: temurin
+          java-version: 17
 
-      - name: Upload APK
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y python3-pip python3-setuptools python3-dev \
+            git zip unzip build-essential ccache autoconf libtool \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo5 cmake libffi-dev libssl-dev libltdl-dev
+
+      - name: Install Buildozer
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install buildozer cython virtualenv
+
+      - name: Build APK
+        run: |
+          python -m buildozer android debug 2>&1 | tee build_log.txt
+
+      - name: Upload build logs + APK
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: mygovapp-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          name: build-output
+          path: |
+            build_log.txt
+            bin/*.apk
+          if-no-files-found: warn

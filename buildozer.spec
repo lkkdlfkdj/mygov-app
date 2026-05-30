@@ -16,7 +16,7 @@ source.exclude_exts = spec,md
 # ==================== 依赖库 ====================
 # Android OCR: 使用 ML Kit Text Recognition（Google 移动端本地OCR）
 # 已移除无法交叉编译的 paddlepaddle / paddleocr / ultralytics / opencv-python
-requirements = python3,kivy,plyer,pillow,zhconv,pandas,fpdf2,openpyxl,numpy,pyjnius
+requirements = python3,kivy,plyer,pillow,zhconv,pyjnius
 
 # ML Kit 文字识别（Google 本地OCR，零联网，全离线）
 android.gradle_dependencies = com.google.mlkit:text-recognition:16.0.0

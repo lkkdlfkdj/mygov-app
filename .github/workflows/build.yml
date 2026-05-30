@@ -44,14 +44,17 @@ jobs:
 
       - name: Build APK
         run: |
-          python -m buildozer android debug 2>&1 | tee build_log.txt
+          python -m buildozer android debug 2>&1
 
-      - name: Upload build logs + APK
-        if: success() || failure()
+      - name: List APK files
+        run: |
+          echo "=== bin/ contents ==="
+          ls -la bin/ || echo "bin/ not found"
+          find . -name "*.apk" -type f 2>/dev/null || echo "no apk found"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: build-output
-          path: |
-            build_log.txt
-            bin/*.apk
-          if-no-files-found: warn
+          name: mygov-app-apk
+          path: bin/*.apk
+          if-no-files-found: error

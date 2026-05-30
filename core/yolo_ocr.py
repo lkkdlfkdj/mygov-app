@@ -31,7 +31,7 @@ except ImportError:
         '聲': '声', '業': '业', '義': '义', '氣': '气', '溫': '温',
         '濕': '湿', '鬥': '斗', '鬧': '闹', '鬱': '郁', '餘': '余',
         '長': '长', '陽': '阳', '陰': '阴', '邊': '边', '還': '还',
-        '進': '进', '過': '过', '這': '这', '種': '种', '樣': '样',
+        '進': '进', '幫': '帮', '戰': '战', '並': '并',
     }
     def zhconv_convert(text, _):
         result = []
@@ -40,12 +40,24 @@ except ImportError:
         return ''.join(result)
 
 
-_ANDROID = False
-try:
-    from jnius import autoclass
-    _ANDROID = True
-except ImportError:
-    pass
+_ANDROID = bool(os.environ.get('ANDROID_ARGUMENT') or os.environ.get('ANDROID_BOOTSTRAP'))
+_MLKIT_AVAILABLE = False
+
+if _ANDROID:
+    try:
+        from jnius import autoclass
+        _MLKIT_CLASSES = {
+            'TextRecognition': autoclass('com.google.mlkit.vision.text.TextRecognition'),
+            'InputImage': autoclass('com.google.mlkit.vision.common.InputImage'),
+            'BitmapFactory': autoclass('android.graphics.BitmapFactory'),
+        }
+        try:
+            _MLKIT_CLASSES['Tasks'] = autoclass('com.google.android.gms.tasks.Tasks')
+        except Exception:
+            _MLKIT_CLASSES['Tasks'] = None
+        _MLKIT_AVAILABLE = True
+    except Exception:
+        _MLKIT_AVAILABLE = False
 
 
 class OCREngine:
@@ -62,24 +74,8 @@ class OCREngine:
         if hasattr(self, '_initialized'):
             return
         self._initialized = True
-        self._model_loaded = False
-        self._mlkit_classes = None
-
-        if _ANDROID:
-            self._init_mlkit()
-
-    def _init_mlkit(self):
-        try:
-            self.TextRecognition = autoclass('com.google.mlkit.vision.text.TextRecognition')
-            self.InputImage = autoclass('com.google.mlkit.vision.common.InputImage')
-            self.BitmapFactory = autoclass('android.graphics.BitmapFactory')
-            try:
-                self.Tasks = autoclass('com.google.android.gms.tasks.Tasks')
-            except Exception:
-                self.Tasks = None
-            self._model_loaded = True
-        except Exception as e:
-            print(f"[OCR] ML Kit init failed: {e}")
+        self._model_loaded = _MLKIT_AVAILABLE
+        self._mlkit = _MLKIT_CLASSES if _MLKIT_AVAILABLE else None
 
     def is_ready(self):
         return self._model_loaded
@@ -123,18 +119,17 @@ class OCREngine:
         return text
 
     def _run_mlkit_ocr(self, image_path):
-        """调用ML Kit进行文字识别"""
         try:
-            bitmap = self.BitmapFactory.decodeFile(image_path)
+            bitmap = self._mlkit['BitmapFactory'].decodeFile(image_path)
             if bitmap is None:
                 return None, '无法解码图片文件'
 
-            input_image = self.InputImage.fromBitmap(bitmap, 0)
-            recognizer = self.TextRecognition.getClient()
+            input_image = self._mlkit['InputImage'].fromBitmap(bitmap, 0)
+            recognizer = self._mlkit['TextRecognition'].getClient()
             task = recognizer.process(input_image)
 
-            if self.Tasks:
-                text_result = self.Tasks.await(task)
+            if self._mlkit.get('Tasks'):
+                text_result = self._mlkit['Tasks'].await(task)
             else:
                 while not task.isComplete():
                     time_module.sleep(0.05)
@@ -148,32 +143,22 @@ class OCREngine:
             return None, str(e)
 
     def ocr_text(self, image_path):
-        """通用文字识别"""
         if not _ANDROID:
             return {
-                'success': False,
-                'texts': [],
-                'full_text': '',
-                'layout': [],
-                'error': 'OCR功能仅在Android设备上可用',
+                'success': False, 'texts': [], 'full_text': '',
+                'layout': [], 'error': 'OCR仅在Android设备上可用',
             }
-        if not self._model_loaded:
+        if not _MLKIT_AVAILABLE:
             return {
-                'success': False,
-                'texts': [],
-                'full_text': '',
-                'layout': [],
-                'error': 'ML Kit未初始化',
+                'success': False, 'texts': [], 'full_text': '',
+                'layout': [], 'error': 'ML Kit未初始化',
             }
 
         text_result, error = self._run_mlkit_ocr(image_path)
         if error or text_result is None:
             return {
-                'success': False,
-                'texts': [],
-                'full_text': '',
-                'layout': [],
-                'error': error or 'OCR未识别到文字',
+                'success': False, 'texts': [], 'full_text': '',
+                'layout': [], 'error': error or 'OCR未识别到文字',
             }
 
         full_text = text_result.getText() or ''
@@ -208,7 +193,6 @@ class OCREngine:
         }
 
     def ocr_numbers(self, image_path):
-        """识别图片中的数字编号"""
         result = self.ocr_text(image_path)
         if result['success'] and result['full_text']:
             numbers = re.findall(r'\d+', result['full_text'])

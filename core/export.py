@@ -1,14 +1,15 @@
 """
 导出工具模块 ExportUtils
-- Excel（带样式） — 使用 pandas + openpyxl
-- PDF（中文不乱码） — 使用 FPDF2 + 内置中文字体
-- CSV
-- JSON
-- TXT
+- Excel（带样式） — 纯Python OOXML构建
+- PDF（中文不乱码） — fpdf2 + 自动检测中文字体
+- CSV — UTF-8 BOM 标准格式
+- JSON — 带导出时间的格式化输出
+- TXT — 易读的纯文本报告
 - 文件保存在 data/exports/ 目录
 """
 
 import os
+import sys
 import json
 import csv
 from datetime import datetime
@@ -295,106 +296,54 @@ def export_excel(table_name, filename=None):
         return False, f'Excel导出失败: {str(e)}'
 
 
-# ==================== PDF 导出（纯Python实现，无外部依赖） ====================
+# ==================== PDF 导出（fpdf2 + 中文支持） ====================
 
-class _SimplePDF:
-    """极简 PDF 生成器（仅支持 Latin-1，用于纯数字/英文标题导出）"""
-    def __init__(self):
-        self.pages = []
-        self.buf = []
-        self.objects = []
-        self._cur_page = []
-        self._y = 0
-        self._x = 0
-        self._page_w = 595  # A4 portrait points
-        self._page_h = 842
-        self._font_size = 10
-        self._leading = 12
+def _find_chinese_font():
+    """查找可用的中文字体（按优先级：内置 → 系统 → None）"""
+    # 1. 项目内置字体（assets/fonts/）
+    builtin = [os.path.join(FONT_DIR, f) for f in [
+        'NotoSansSC-Regular.otf', 'NotoSansSC-Regular.ttf',
+        'NotoSansSC-VF.ttf', 'NotoSansSC-VF.otf',
+        'simhei.ttf', 'msyh.ttc', 'simsun.ttc',
+    ]]
+    for p in builtin:
+        if os.path.exists(p):
+            return p
 
-    def add_page(self):
-        if self._cur_page:
-            self.pages.append(self._cur_page)
-        self._cur_page = []
-        self._y = 40
-        self._x = 40
+    # 2. Windows 系统字体
+    if sys.platform == 'win32':
+        win_dir = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts')
+        for fname in ['simhei.ttf', 'msyh.ttc', 'simsun.ttc', 'simfang.ttf', 'simkai.ttf']:
+            p = os.path.join(win_dir, fname)
+            if os.path.exists(p):
+                return p
 
-    def set_font(self, name, size=10):
-        self._font_size = size
-        self._leading = size * 1.2
+    # 3. Android 系统字体
+    android_fonts = [
+        '/system/fonts/NotoSansSC-Regular.ttf',
+        '/system/fonts/DroidSansFallback.ttf',
+        '/system/fonts/NotoSansCJK-Regular.ttc',
+    ]
+    for p in android_fonts:
+        if os.path.exists(p):
+            return p
 
-    def _esc_text(self, text):
-        res = []
-        for ch in text:
-            o = ord(ch)
-            if o < 32 or (o > 126 and o < 160):
-                res.append('#')
-            elif o > 255:
-                res.append('?')
-            else:
-                res.append(ch)
-        return ''.join(res)
+    # 4. macOS/Linux 常见字体
+    linux_fonts = [
+        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+    ]
+    for p in linux_fonts:
+        if os.path.exists(p):
+            return p
 
-    def cell(self, w, h, text, align='L'):
-        text = self._esc_text(str(text)) if text else ''
-        x, y = self._x, self._y
-        if align == 'C':
-            tx = x + w/2
-        elif align == 'R':
-            tx = x + w - 2
-        else:
-            tx = x + 2
-        ty = y + h - 2
-        line = f'BT /F1 {self._font_size} Tf {tx:.0f} {ty:.0f} Td ({text}) Tj ET'
-        rect = f'{x:.0f} {y:.0f} {w:.0f} {h:.0f} re S'
-        self._cur_page.append(f'q {rect {line} Q')
-        self._x += w
-
-    def multi_cell(self, w, h, text):
-        self.cell(w, h, text)
-
-    def ln(self, h=None):
-        self._x = 40
-        self._y += h or self._leading
-
-    def output(self, filepath):
-        if self._cur_page:
-            self.pages.append(self._cur_page)
-        objects = []
-        # Font
-        objects.append('1 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj')
-        # Pages
-        pages_obj = []
-        for i, page in enumerate(self.pages):
-            content = ' '.join(page)
-            content_id = len(objects) + 2
-            objects.append(f'{content_id} 0 obj << /Length {len(content)} >> stream\n{content}\nendstream')
-            pages_obj.append(f'{content_id} 0 R')
-        # Pages tree
-        pages_tree_id = len(objects) + 1
-        objects.insert(0, f'{pages_tree_id} 0 obj << /Type /Pages /Kids [{" ".join(pages_obj)}] /Count {len(self.pages)} >> endobj')
-        # Catalog
-        catalog_id = len(objects) + 1
-        objects.append(f'{catalog_id} 0 obj << /Type /Catalog /Pages {pages_tree_id} 0 R >> endobj')
-        # Build PDF
-        pdf = f'%PDF-1.4\n'
-        offsets = []
-        for obj in objects:
-            offsets.append(len(pdf))
-            pdf += obj + '\n'
-        xref_offset = len(pdf)
-        pdf += f'xref\n0 {len(objects)+1}\n0000000000 65535 f \n'
-        for off in offsets:
-            pdf += f'{off:010d} 00000 n \n'
-        pdf += f'trailer << /Size {len(objects)+1} /Root {catalog_id} 0 R >>\nstartxref\n{xref_offset}\n%%EOF'
-        with open(filepath, 'wb') as f:
-            f.write(pdf.encode('latin-1'))
-        return True
+    return None
 
 
 def export_pdf(table_name, filename=None):
     """
-    导出为PDF文件（纯Python，无fpdf2依赖）
-    注意：中文使用 ? 替代，建议导出 CSV 或 Excel 以获得完整中文支持
+    导出为PDF文件（fpdf2，支持中文）
+    自动检测系统中文字体，找不到时回退到 Base64 编码占位
     返回: (success, filepath_or_error)
     """
     columns, rows, error = _get_table_data(table_name)
@@ -410,38 +359,141 @@ def export_pdf(table_name, filename=None):
 
         filepath = os.path.join(EXPORT_DIR, filename)
 
+        cn_font_path = _find_chinese_font()
+        has_cn_font = cn_font_path is not None
+
+        from fpdf import FPDF
+        pdf = FPDF(orientation='P', unit='mm', format='A4')
+        pdf.add_page()
+
+        if has_cn_font:
+            pdf.add_font('CN', '', cn_font_path, uni=True)
+            title_font = 'CN'
+            body_font = 'CN'
+        else:
+            title_font = 'Courier'
+            body_font = 'Courier'
+
+        # 标题
+        title_map = {
+            'complaints': '投诉管理数据报告',
+            'hazards': '隐患上报数据报告',
+            'cases': '案件采集数据报告',
+            'laws': '法条库数据报告',
+            'ads': '店招申请数据报告',
+        }
+        title_text = title_map.get(table_name, f'{table_name}数据报告')
+
+        pdf.set_font(title_font, '', 16)
+        pdf.cell(0, 10, title_text, new_x='LMARGIN', new_y='NEXT', align='C')
+        pdf.ln(2)
+
+        pdf.set_font(body_font, '', 9)
+        export_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        pdf.cell(0, 6, f'导出时间: {export_time}', new_x='LMARGIN', new_y='NEXT')
+        pdf.cell(0, 6, f'记录总数: {len(rows)} 条', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(4)
+
         header_labels = [c[0] for c in columns]
         field_names = [c[1] for c in columns]
 
-        pdf = _SimplePDF()
-        pdf.add_page()
-        pdf.set_font('Courier', 14)
-        pdf.multi_cell(0, 10, f'{table_name}')
-        pdf.ln(5)
-        pdf.set_font('Courier', 8)
-        pdf.cell(0, 5, f'Export: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-        pdf.ln(8)
+        usable_w = 190
+        col_w = min(40, usable_w / max(len(header_labels), 1))
 
-        col_w = min(120, int((pdf._page_w - 80) / len(header_labels)))
-        pdf.set_font('Courier', 9)
+        # 表头
+        pdf.set_font(body_font, '', 9)
+        pdf.set_fill_color(46, 125, 50)
+        pdf.set_text_color(255, 255, 255)
         for h in header_labels:
-            pdf.cell(col_w, 8, h, align='C')
-        pdf.ln(10)
-        pdf.set_font('Courier', 8)
+            pdf.cell(col_w, 7, h, border=1, fill=True, align='C')
+        pdf.ln()
+
+        # 数据行
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(body_font, '', 8)
+        fill = False
         for row in rows:
-            for field in field_names:
-                val = _format_value(row.get(field, ''), max_len=20)
-                pdf.cell(col_w, 7, val)
-            pdf.ln(8)
-        pdf.ln(5)
-        pdf.set_font('Courier', 9)
-        pdf.cell(0, 5, f'Total: {len(rows)} records')
+            values = [_format_value(row.get(f, ''), max_len=int(col_w * 1.5)) for f in field_names]
+            max_h = 7
+            if fill:
+                pdf.set_fill_color(240, 240, 240)
+            else:
+                pdf.set_fill_color(255, 255, 255)
+
+            x_start = pdf.get_x()
+            for i, val in enumerate(values):
+                pdf.cell(col_w, max_h, val, border=1, fill=True, align='L')
+                pdf.set_xy(x_start + col_w * (i + 1), pdf.get_y())
+
+            pdf.ln(max_h)
+            fill = not fill
+
+            if pdf.get_y() > 275:
+                pdf.add_page()
+                pdf.set_font(body_font, '', 9)
+                pdf.set_fill_color(46, 125, 50)
+                pdf.set_text_color(255, 255, 255)
+                for h in header_labels:
+                    pdf.cell(col_w, 7, h, border=1, fill=True, align='C')
+                pdf.ln()
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_font(body_font, '', 8)
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(4)
+        pdf.set_font(body_font, '', 10)
+        pdf.cell(0, 6, f'共 {len(rows)} 条记录', new_x='LMARGIN', new_y='NEXT', align='C')
+
+        if not has_cn_font:
+            pdf.set_font('Courier', '', 8)
+            pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 5, 'Note: 未检测到中文字体，中文显示为 ?', new_x='LMARGIN', new_y='NEXT', align='C')
+            pdf.set_text_color(0, 0, 0)
 
         pdf.output(filepath)
         return True, filepath
 
+    except ImportError:
+        return _export_pdf_fallback(table_name, filename)
     except Exception as e:
         return False, f'PDF导出失败: {str(e)}'
+
+
+def _export_pdf_fallback(table_name, filename=None):
+    """当 fpdf2 不可用时的回退方案"""
+    columns, rows, error = _get_table_data(table_name)
+    if error:
+        return False, error
+
+    try:
+        _ensure_export_dir()
+        if filename is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'{table_name}_{timestamp}.pdf'
+
+        filepath = os.path.join(EXPORT_DIR, filename)
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(f'PDF导出 - {table_name}\n')
+            f.write(f'导出时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'记录总数: {len(rows)}\n')
+            f.write('=' * 60 + '\n\n')
+
+            header_labels = [h[0] for h in columns]
+            field_names = [h[1] for h in columns]
+            f.write(' | '.join(header_labels) + '\n')
+            f.write('-' * 60 + '\n')
+
+            for row in rows:
+                vals = [_format_value(row.get(f, '')) for f in field_names]
+                f.write(' | '.join(vals) + '\n')
+
+            f.write('\n' + '=' * 60 + '\n')
+            f.write(f'共 {len(rows)} 条记录\n')
+
+        return True, filepath
+    except Exception as e:
+        return False, f'PDF回退导出失败: {str(e)}'
 
 
 # ==================== CSV 导出 ====================

@@ -17,8 +17,10 @@ from kivy.uix.togglebutton import ToggleButton
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.animation import Animation
+from kivy.clock import Clock
 
-from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT
+from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT, SPACING, RADIUS, SHADOWS
+from ui.styles import toolbar_bg, primary_btn, secondary_btn
 
 # ========== 内置法条数据 ==========
 # 结构：id, 类别, 标题, 违法行为, 禁止法条, 处罚法条, 处罚标准
@@ -206,8 +208,8 @@ BUILT_IN_LAWS = [
 ]
 
 
-class AccordionItem(BoxLayout):
-    """手风琴折叠面板单项"""
+class LawCard(BoxLayout):
+    """法律法规单项卡片"""
 
     def __init__(self, law_data, **kwargs):
         super().__init__(
@@ -388,11 +390,7 @@ class LawScreen(Screen):
             height=TOOLBAR_HEIGHT,
             padding=[dp(16), 0],
         )
-        with toolbar.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=toolbar.pos, size=toolbar.size)
-        toolbar.bind(pos=self._update_toolbar_bg,
-                     size=self._update_toolbar_bg)
+        toolbar_bg(toolbar)
 
         title_label = Label(
             text=PAGE_TITLES['law'],
@@ -504,12 +502,6 @@ class LawScreen(Screen):
         # 初始化显示所有法条
         Clock.schedule_once(lambda dt: self._render_list(), 0.1)
 
-    def _update_toolbar_bg(self, instance, value):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=instance.pos, size=instance.size)
-
     def _refresh_search_bg(self, instance, value):
         instance.canvas.before.clear()
         with instance.canvas.before:
@@ -571,8 +563,5 @@ class LawScreen(Screen):
             return
 
         for law in filtered:
-            item = AccordionItem(law_data=law)
+            item = LawCard(law_data=law)
             self.list_content.add_widget(item)
-
-
-from kivy.clock import Clock

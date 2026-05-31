@@ -21,7 +21,9 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.clock import Clock
 
-from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT
+from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT, SPACING, RADIUS, SHADOWS
+from ui.styles import toolbar_bg, primary_btn, secondary_btn, SPACING, RADIUS, SHADOWS
+from ui.styles import toolbar_bg, primary_btn, secondary_btn
 from core.yolo_ocr import OCREngine
 from core.export import export_data, EXPORT_FORMATS
 
@@ -43,11 +45,7 @@ class ComplaintScreen(Screen):
             height=TOOLBAR_HEIGHT,
             padding=[dp(16), 0],
         )
-        with toolbar.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=toolbar.pos, size=toolbar.size)
-        toolbar.bind(pos=self._update_toolbar_bg,
-                     size=self._update_toolbar_bg)
+        toolbar_bg(toolbar)
 
         title_label = Label(
             text=PAGE_TITLES['complaint'],
@@ -70,8 +68,12 @@ class ComplaintScreen(Screen):
             spacing=dp(8),
         )
         with stat_bar.canvas.before:
-            Color(*COLORS['background'])
-            Rectangle(pos=stat_bar.pos, size=stat_bar.size)
+            Color(*COLORS['surface'])
+            RoundedRectangle(
+                pos=stat_bar.pos,
+                size=stat_bar.size,
+                radius=[RADIUS['md']]*4,
+            )
         stat_bar.bind(pos=self._refresh_stat_bg,
                       size=self._refresh_stat_bg)
 
@@ -91,22 +93,19 @@ class ComplaintScreen(Screen):
             spacing=dp(10),
         )
 
-        add_btn = Button(
-            text='＋ 新增投诉',
-            font_size=FONT_SIZES['body'],
+        add_btn = primary_btn(
+            '＋ 新增投诉',
+            on_press=self._show_add_popup,
             size_hint=(0.5, 1),
-            background_color=COLORS['primary'],
-            background_normal='',
-            color=[1, 1, 1, 1],
+            height=dp(44),
         )
-        add_btn.bind(on_press=self._show_add_popup)
         action_bar.add_widget(add_btn)
 
         export_btn = Button(
             text='📤 导出',
             font_size=FONT_SIZES['body'],
             size_hint=(0.5, 1),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -120,7 +119,7 @@ class ComplaintScreen(Screen):
         self.list_content = BoxLayout(
             orientation='vertical',
             padding=[dp(12), dp(8)],
-            spacing=dp(6),
+            spacing=dp(8),
             size_hint=(1, None),
         )
         self.list_content.bind(
@@ -143,17 +142,15 @@ class ComplaintScreen(Screen):
         root.add_widget(scroll)
         self.add_widget(root)
 
-    def _update_toolbar_bg(self, instance, value):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=instance.pos, size=instance.size)
-
     def _refresh_stat_bg(self, instance, value):
         instance.canvas.before.clear()
         with instance.canvas.before:
-            Color(*COLORS['background'])
-            Rectangle(pos=instance.pos, size=instance.size)
+            Color(*COLORS['surface'])
+            RoundedRectangle(
+                pos=instance.pos,
+                size=instance.size,
+                radius=[RADIUS['md']]*4,
+            )
 
     def _create_stat_item(self, parent, label, value):
         """创建统计项"""
@@ -213,7 +210,7 @@ class ComplaintScreen(Screen):
             text='选择图片',
             font_size=sp(12),
             size_hint=(0.2, 1),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -235,12 +232,13 @@ class ComplaintScreen(Screen):
         content.add_widget(ocr_row)
 
         # ---- OCR状态提示 ----
+        backend_text = self.ocr_engine.get_status_text()
         self.ocr_status = Label(
-            text='选择图片后点击OCR识别自动填充表单',
+            text=backend_text + '\n选择图片后点击OCR识别自动填充表单',
             font_size=sp(11),
             color=COLORS['text_secondary'],
             size_hint=(1, None),
-            height=dp(22),
+            height=dp(36),
             halign='left',
             valign='middle',
             text_size=(self.width * 0.75, None),
@@ -424,37 +422,61 @@ class ComplaintScreen(Screen):
     def _fill_form_from_ocr(self, full_text, texts):
         """根据OCR识别结果填充表单"""
         lines = full_text.split('\n')
-        # 提取关键信息
         title = ''
         complainant = ''
         phone = ''
         address = ''
         content_lines = []
 
+        # 第一轮：提取字段行（带冒号的标签-值对）
+        remaining = []
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-            # 智能匹配：尝试识别常见字段
-            if any(k in line for k in ['投诉', '举报', '反映', '关于']):
-                title = line
-            elif any(k in line for k in ['投诉人', '举报人', '姓名', '反映人']):
-                # 提取冒号后的内容
-                parts = line.split(':', 1) if ':' in line else line.split('：', 1)
-                complainant = parts[1].strip() if len(parts) > 1 else line
-            elif any(k in line for k in ['电话', '手机', '联系', 'Tel', 'tel']):
-                parts = line.split(':', 1) if ':' in line else line.split('：', 1)
-                phone = parts[1].strip() if len(parts) > 1 else line
-                # 提取纯数字
-                import re
-                nums = re.findall(r'1[3-9]\d{9}|\d{7,12}', phone)
-                if nums:
-                    phone = nums[0]
-            elif any(k in line for k in ['地址', '地点', '位置', '路段']):
-                parts = line.split(':', 1) if ':' in line else line.split('：', 1)
-                address = parts[1].strip() if len(parts) > 1 else line
-            else:
-                content_lines.append(line)
+            has_colon = ':' in line or '：' in line
+
+            extracted = False
+            if has_colon:
+                sep = ':' if ':' in line else '：'
+                parts = line.split(sep, 1)
+
+                if any(k in parts[0] for k in ['投诉人', '举报人', '反映人']):
+                    complainant = parts[1].strip() if len(parts) > 1 else parts[0]
+                    extracted = True
+                elif any(k in parts[0] for k in ['电话', '手机', 'Tel', 'tel']):
+                    phone = parts[1].strip() if len(parts) > 1 else parts[0]
+                    import re
+                    nums = re.findall(r'1[3-9]\d{9}|\d{7,12}', phone)
+                    if nums:
+                        phone = nums[0]
+                    extracted = True
+                elif any(k in parts[0] for k in ['地址', '地点', '位置', '路段']):
+                    address = parts[1].strip() if len(parts) > 1 else parts[0]
+                    extracted = True
+
+            if not extracted:
+                remaining.append(line)
+
+        # 第二轮：从剩余行中提取标题
+        content_candidates = []
+        for line in remaining:
+            has_colon = ':' in line or '：' in line
+            if any(k in line for k in ['投诉', '举报', '关于', '反映']):
+                if has_colon:
+                    sep = ':' if ':' in line else '：'
+                    parts = line.split(sep, 1)
+                    title_candidate = parts[0].strip()
+                    content_after = parts[1].strip() if len(parts) > 1 else ''
+                    if not title:
+                        title = title_candidate
+                    if content_after:
+                        content_candidates.append(content_after)
+                else:
+                    if not title:
+                        title = line
+                continue
+            content_candidates.append(line)
 
         # 自动填充表单
         if title:
@@ -465,15 +487,16 @@ class ComplaintScreen(Screen):
             self.form_inputs['phone'].text = phone
         if address:
             self.form_inputs['address'].text = address
-        if content_lines:
-            self.form_inputs['content'].text = '\n'.join(content_lines)
-        elif not title:
-            # 如果没有匹配到任何字段，把所有识别文字放入内容
-            self.form_inputs['content'].text = full_text
+        if content_candidates:
+            self.form_inputs['content'].text = '\n'.join(content_candidates)
 
-        # 如果没有匹配到标题，用第一行
-        if not title and lines:
+        # 什么都没有匹配到：全部放入内容
+        if not title and not content_candidates and lines:
             self.form_inputs['title'].text = lines[0]
+            if len(lines) > 1:
+                self.form_inputs['content'].text = '\n'.join(lines[1:])
+            elif len(lines) == 1:
+                self.form_inputs['content'].text = lines[0]
 
         self._update_ocr_status(f'OCR完成！识别到{len(texts)}段文字，已自动填充')
 
@@ -552,11 +575,17 @@ class ComplaintScreen(Screen):
             spacing=dp(8),
         )
         with item.canvas.before:
+            Color(*SHADOWS['card'])
+            RoundedRectangle(
+                pos=(item.x, item.y),
+                size=(item.size[0], item.size[1] + dp(2)),
+                radius=[RADIUS['md']]*4,
+            )
             Color(*COLORS['surface'])
             RoundedRectangle(
                 pos=item.pos,
                 size=item.size,
-                radius=[dp(4), dp(4), dp(4), dp(4)]
+                radius=[RADIUS['md']]*4,
             )
         item.bind(pos=self._refresh_item_bg,
                   size=self._refresh_item_bg)
@@ -674,6 +703,13 @@ class ComplaintScreen(Screen):
             padding=[dp(12), dp(6)],
         )
 
+        popup = Popup(
+            title='投诉详情',
+            content=popup_content,
+            size_hint=(0.85, 0.78),
+            auto_dismiss=True,
+        )
+
         close_btn = Button(
             text='关闭',
             size_hint=(0.4, 1),
@@ -681,6 +717,7 @@ class ComplaintScreen(Screen):
             background_normal='',
             color=COLORS['text_primary'],
         )
+        close_btn.bind(on_press=popup.dismiss)
 
         # 只有未完成的投诉才显示"处理完成"按钮
         cid = complaint.get('id')
@@ -693,9 +730,9 @@ class ComplaintScreen(Screen):
                 background_normal='',
                 color=[1, 1, 1, 1],
             )
-            complete_btn.bind(on_press=lambda btn, cid=cid: (
+            complete_btn.bind(on_press=lambda btn, cid=cid, p=popup: (
                 self._show_complete_popup(cid, complaint),
-                popup.dismiss() if 'popup' in dir() else None
+                p.dismiss()
             ))
             btn_box.add_widget(complete_btn)
 
@@ -706,19 +743,11 @@ class ComplaintScreen(Screen):
             background_normal='',
             color=[1, 1, 1, 1],
         )
-        delete_btn.bind(on_press=lambda btn, cid=cid: (
+        delete_btn.bind(on_press=lambda btn, cid=cid, p=popup: (
             self._delete_complaint(cid),
-            popup.dismiss() if 'popup' in dir() else None
+            p.dismiss()
         ))
 
-        popup = Popup(
-            title='投诉详情',
-            content=popup_content,
-            size_hint=(0.85, 0.78),
-            auto_dismiss=True,
-        )
-
-        close_btn.bind(on_press=popup.dismiss)
         btn_box.add_widget(close_btn)
         btn_box.add_widget(delete_btn)
 
@@ -793,7 +822,7 @@ class ComplaintScreen(Screen):
             text='选择照片',
             font_size=sp(12),
             size_hint=(0.5, 1),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -935,14 +964,19 @@ class ComplaintScreen(Screen):
         self._refresh_list()
 
     def _refresh_item_bg(self, instance, value):
-        """刷新列表项背景"""
         instance.canvas.before.clear()
         with instance.canvas.before:
+            Color(*SHADOWS['card'])
+            RoundedRectangle(
+                pos=(instance.x, instance.y),
+                size=(instance.size[0], instance.size[1] + dp(2)),
+                radius=[RADIUS['md']]*4,
+            )
             Color(*COLORS['surface'])
             RoundedRectangle(
                 pos=instance.pos,
                 size=instance.size,
-                radius=[dp(4), dp(4), dp(4), dp(4)]
+                radius=[RADIUS['md']]*4,
             )
 
     def _on_export(self, instance):
@@ -988,7 +1022,7 @@ class ComplaintScreen(Screen):
                 font_size=FONT_SIZES['body'],
                 size_hint=(1, None),
                 height=dp(44),
-                background_color=COLORS['secondary'] if fmt_key != 'excel' else COLORS['primary'],
+                background_color=COLORS['primary_light'] if fmt_key != 'excel' else COLORS['primary'],
                 background_normal='',
                 color=[1, 1, 1, 1],
             )

@@ -9,11 +9,18 @@ build/
 # Data & assets (generated at runtime)
 data/
 assets/yolov8n.pt
-assets/fonts/
+
+# Font downloads (ignore extracted zip contents, keep the font files)
+assets/fonts/*.zip
+scripts/__pycache__/
 
 # Buildozer
 bin/
 .buildozer/
+*.log
+
+# APK artifacts
+*.apk
 
 # IDE
 .vscode/

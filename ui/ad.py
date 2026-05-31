@@ -21,7 +21,8 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.clock import Clock
 
-from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT
+from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT, SPACING, RADIUS, SHADOWS
+from ui.styles import toolbar_bg, primary_btn, secondary_btn
 
 # ========== 5步流程数据 ==========
 STEPS = [
@@ -159,11 +160,7 @@ class AdScreen(Screen):
             height=TOOLBAR_HEIGHT,
             padding=[dp(16), 0],
         )
-        with toolbar.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=toolbar.pos, size=toolbar.size)
-        toolbar.bind(pos=self._update_toolbar_bg,
-                     size=self._update_toolbar_bg)
+        toolbar_bg(toolbar)
 
         title_label = Label(
             text=PAGE_TITLES['ad'],
@@ -300,7 +297,7 @@ class AdScreen(Screen):
             font_size=FONT_SIZES['body'],
             size_hint=(1, None),
             height=dp(44),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -710,12 +707,6 @@ class AdScreen(Screen):
         file_popup.open()
 
     # ==================== UI辅助 ====================
-
-    def _update_toolbar_bg(self, instance, value):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=instance.pos, size=instance.size)
 
     def _refresh_survey_card(self, instance, value):
         instance.canvas.before.clear()

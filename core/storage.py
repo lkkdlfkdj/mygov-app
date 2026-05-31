@@ -136,6 +136,28 @@ class Storage:
 
         conn.commit()
         conn.close()
+        self._migrate_database()
+
+    def _migrate_database(self):
+        """数据库迁移：添加新字段到已存在的表"""
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(cases)")
+        existing = {row['name'] for row in cursor.fetchall()}
+
+        new_columns = {
+            'party_phone': "TEXT DEFAULT ''",
+            'party_address': "TEXT DEFAULT ''",
+            'rectify_requirements': "TEXT DEFAULT ''",
+            'rectify_deadline': "TEXT DEFAULT ''",
+        }
+        for col_name, col_def in new_columns.items():
+            if col_name not in existing:
+                cursor.execute(f"ALTER TABLE cases ADD COLUMN {col_name} {col_def}")
+
+        conn.commit()
+        conn.close()
 
     # ==================== 投诉管理 ====================
 
@@ -287,16 +309,21 @@ class Storage:
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO cases (case_type, case_number, number_range_start,
-                number_range_end, party_name, violation_fact,
+                number_range_end, party_name, party_phone, party_address,
+                violation_fact, rectify_requirements, rectify_deadline,
                 photo_paths, ocr_result)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('case_type', 'deduction'),
             data.get('case_number', ''),
             data.get('number_range_start', ''),
             data.get('number_range_end', ''),
             data.get('party_name', ''),
+            data.get('party_phone', ''),
+            data.get('party_address', ''),
             data.get('violation_fact', ''),
+            data.get('rectify_requirements', ''),
+            data.get('rectify_deadline', ''),
             json.dumps(data.get('photo_paths', [])),
             data.get('ocr_result', ''),
         ))
@@ -321,6 +348,38 @@ class Storage:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def get_case_by_id(self, case_id):
+        """根据ID获取案件"""
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM cases WHERE id = ?', (case_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def update_case(self, case_id, data):
+        """更新案件"""
+        conn = get_connection()
+        cursor = conn.cursor()
+        fields = []
+        values = []
+        for key in ['case_number', 'party_name', 'party_phone', 'party_address',
+                     'violation_fact', 'rectify_requirements', 'rectify_deadline',
+                     'status', 'ocr_result', 'photo_paths']:
+            if key in data:
+                if key == 'photo_paths':
+                    fields.append(f'{key}=?')
+                    values.append(json.dumps(data[key]))
+                else:
+                    fields.append(f'{key}=?')
+                    values.append(data[key])
+        if fields:
+            query = f'UPDATE cases SET {", ".join(fields)} WHERE id=?'
+            values.append(case_id)
+            cursor.execute(query, values)
+            conn.commit()
+        conn.close()
 
     def delete_case(self, case_id):
         """删除案件"""

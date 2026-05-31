@@ -7,6 +7,7 @@
 """
 
 import os
+from datetime import datetime
 from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -18,8 +19,10 @@ from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
+from kivy.clock import Clock
 
-from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT
+from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT, SPACING, RADIUS, SHADOWS
+from ui.styles import toolbar_bg, primary_btn, secondary_btn
 from core.yolo_ocr import OCREngine
 from core.export import export_data, EXPORT_FORMATS
 
@@ -43,11 +46,7 @@ class CaseScreen(Screen):
             height=TOOLBAR_HEIGHT,
             padding=[dp(16), 0],
         )
-        with toolbar.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=toolbar.pos, size=toolbar.size)
-        toolbar.bind(pos=self._update_toolbar_bg,
-                     size=self._update_toolbar_bg)
+        toolbar_bg(toolbar)
 
         title_label = Label(
             text=PAGE_TITLES['case'],
@@ -117,16 +116,6 @@ class CaseScreen(Screen):
 
         # 初始化显示扣单管理内容
         Clock.schedule_once(lambda dt: self._show_deduction_content(), 0.1)
-
-    def _clock_import(self):
-        from kivy.clock import Clock
-        return Clock
-
-    def _update_toolbar_bg(self, instance, value):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=instance.pos, size=instance.size)
 
     def _refresh_tab_bar_bg(self, instance, value):
         instance.canvas.before.clear()
@@ -203,7 +192,7 @@ class CaseScreen(Screen):
             text='选择图片',
             font_size=sp(12),
             size_hint=(0.2, 1),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -223,12 +212,13 @@ class CaseScreen(Screen):
         self.content.add_widget(ocr_row)
 
         # OCR状态提示
+        backend_text = self.ocr_engine.get_status_text()
         self.ocr_status = Label(
-            text='选择扣单图片后点击OCR识别编号',
+            text=backend_text + '\n选择扣单图片后点击OCR识别编号',
             font_size=sp(11),
             color=COLORS['text_secondary'],
             size_hint=(1, None),
-            height=dp(24),
+            height=dp(40),
             halign='left',
             valign='middle',
             text_size=(self.width - dp(32), None),
@@ -280,54 +270,195 @@ class CaseScreen(Screen):
         self.content.add_widget(export_btn)
 
     def _show_rectify_content(self):
-        """显示责令整改内容"""
+        """显示责令整改完整表单"""
         self.content.clear_widgets()
+        self._rectify_photo_paths = []
 
-        self._add_section_title('📋 责令整改')
+        # ============ 当事人信息 ============
+        self._add_section_title('👤 当事人信息')
+        fields = [
+            ('当事人姓名', 'party_name', False),
+            ('联系电话', 'party_phone', False),
+            ('联系地址', 'party_address', False),
+        ]
+        self._rectify_inputs = {}
+        for label_text, field_name, is_multiline in fields:
+            row = BoxLayout(orientation='vertical', size_hint=(1, None), spacing=dp(2))
+            lbl = Label(
+                text=label_text, font_size=sp(12), color=COLORS['primary'],
+                size_hint=(1, None), height=dp(18),
+                halign='left', valign='middle', bold=True,
+            )
+            inp = TextInput(
+                text='', hint_text=f'请输入{label_text}',
+                font_size=sp(13), size_hint=(1, None), height=dp(36),
+                multiline=False,
+            )
+            row.add_widget(lbl)
+            row.add_widget(inp)
+            self.content.add_widget(row)
+            self._rectify_inputs[field_name] = inp
 
-        self._add_info_label('整改编号（开发中）')
-
-        self._add_section_title('整改内容')
-        self._add_info_label(
-            '责令整改通知书内容录入（开发中）\n'
-            '包含：当事人信息、违法事实、整改要求、期限等'
+        # ============ 违法事实 ============
+        self._add_section_title('⚠️ 违法事实')
+        self._rectify_inputs['violation_fact'] = TextInput(
+            text='', hint_text='请输入违法事实描述...',
+            font_size=sp(13), size_hint=(1, None), height=dp(80),
+            multiline=True,
         )
+        self.content.add_widget(self._rectify_inputs['violation_fact'])
 
+        # ============ 整改要求 ============
+        self._add_section_title('📋 整改要求')
+        self._rectify_inputs['rectify_requirements'] = TextInput(
+            text='', hint_text='请输入整改要求...',
+            font_size=sp(13), size_hint=(1, None), height=dp(80),
+            multiline=True,
+        )
+        self.content.add_widget(self._rectify_inputs['rectify_requirements'])
+
+        # ============ 整改期限 ============
+        self._add_section_title('⏰ 整改期限')
+        self._rectify_inputs['rectify_deadline'] = TextInput(
+            text='', hint_text='如：2026-06-15',
+            font_size=sp(13), size_hint=(1, None), height=dp(36),
+            multiline=False,
+        )
+        self.content.add_widget(self._rectify_inputs['rectify_deadline'])
+
+        # ============ 现场照片 ============
         self._add_section_title('📷 现场照片')
-        self._add_info_label(
-            '上传整改前后对比照片（开发中）\n'
-            '最多6张，自动压缩'
+        photo_row = BoxLayout(
+            orientation='horizontal', size_hint=(1, None),
+            height=dp(40), spacing=dp(6),
         )
+        self._rectify_photo_label = Label(
+            text='未选择', font_size=sp(12), color=COLORS['text_secondary'],
+            size_hint=(0.5, 1), halign='left', valign='middle',
+        )
+        select_photo_btn = Button(
+            text='选择照片', font_size=sp(12),
+            size_hint=(0.5, 1),
+            background_color=COLORS['primary_light'], background_normal='',
+            color=[1, 1, 1, 1],
+        )
+        select_photo_btn.bind(on_press=lambda btn: self._select_rectify_photo())
+        photo_row.add_widget(self._rectify_photo_label)
+        photo_row.add_widget(select_photo_btn)
+        self.content.add_widget(photo_row)
 
+        # ============ 提交按钮 ============
         submit_btn = Button(
             text='✓ 提交归档',
             font_size=FONT_SIZES['medium'],
-            size_hint=(1, None),
-            height=dp(46),
+            size_hint=(1, None), height=dp(46),
             background_color=COLORS['primary'],
-            background_normal='',
-            color=[1, 1, 1, 1],
-            bold=True,
+            background_normal='', color=[1, 1, 1, 1], bold=True,
         )
-        submit_btn.bind(on_press=self._on_submit)
+        submit_btn.bind(on_press=self._on_rectify_submit)
         self.content.add_widget(submit_btn)
 
-        # 已归档责令整改列表
-        self._add_section_title('已归档整改')
+        # ============ 已归档列表 ============
+        self._add_section_title('📦 已归档整改')
         self._build_archived_list('rectify')
 
-        # 导出按钮
+        # ============ 导出 ============
         export_btn = Button(
             text='📤 导出Excel',
             font_size=FONT_SIZES['body'],
-            size_hint=(1, None),
-            height=dp(44),
-            background_color=COLORS['secondary'],
-            background_normal='',
-            color=[1, 1, 1, 1],
+            size_hint=(1, None), height=dp(44),
+            background_color=COLORS['primary_light'],
+            background_normal='', color=[1, 1, 1, 1],
         )
         export_btn.bind(on_press=self._on_export)
         self.content.add_widget(export_btn)
+
+    # ==================== 责令整改 ====================
+
+    def _select_rectify_photo(self):
+        """选择责令整改现场照片"""
+        content = BoxLayout(orientation='vertical')
+        filechooser = FileChooserListView(
+            path='C:\\', filters=['*.png', '*.jpg', '*.jpeg', '*.bmp'],
+        )
+        content.add_widget(filechooser)
+
+        btn_row = BoxLayout(
+            orientation='horizontal', size_hint=(1, None), height=dp(48),
+            spacing=dp(8), padding=[dp(8), dp(4)],
+        )
+        select_btn = Button(
+            text='选择', background_color=COLORS['primary'],
+            background_normal='', color=[1, 1, 1, 1],
+        )
+        cancel_btn = Button(
+            text='取消', background_color=COLORS['divider'],
+            background_normal='', color=COLORS['text_primary'],
+        )
+
+        file_popup = Popup(
+            title='选择现场照片', content=content,
+            size_hint=(0.92, 0.85), auto_dismiss=False,
+        )
+
+        def on_select(instance):
+            if filechooser.selection and len(filechooser.selection) > 0:
+                path = filechooser.selection[0]
+                if path not in self._rectify_photo_paths:
+                    self._rectify_photo_paths.append(path)
+                count = len(self._rectify_photo_paths)
+                self._rectify_photo_label.text = f'已选 {count}/6 张'
+            file_popup.dismiss()
+
+        select_btn.bind(on_press=on_select)
+        cancel_btn.bind(on_press=file_popup.dismiss)
+        btn_row.add_widget(select_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+        file_popup.open()
+
+    def _on_rectify_submit(self, instance):
+        """提交责令整改归档"""
+        name = self._rectify_inputs['party_name'].text.strip()
+        phone = self._rectify_inputs['party_phone'].text.strip()
+        address = self._rectify_inputs['party_address'].text.strip()
+        violation = self._rectify_inputs['violation_fact'].text.strip()
+        requirements = self._rectify_inputs['rectify_requirements'].text.strip()
+        deadline = self._rectify_inputs['rectify_deadline'].text.strip()
+
+        if not name:
+            app = self._get_app()
+            if app:
+                app.show_toast('请填写当事人姓名', 'warning')
+            return
+        if not violation:
+            app = self._get_app()
+            if app:
+                app.show_toast('请填写违法事实', 'warning')
+            return
+
+        case_number = f'ZG{datetime.now().strftime("%Y%m%d%H%M%S")}'
+
+        from core.storage import Storage
+        storage = Storage()
+        cid = storage.add_case({
+            'case_type': 'rectify',
+            'case_number': case_number,
+            'party_name': name,
+            'party_phone': phone,
+            'party_address': address,
+            'violation_fact': violation,
+            'rectify_requirements': requirements,
+            'rectify_deadline': deadline,
+            'photo_paths': self._rectify_photo_paths,
+        })
+
+        if cid:
+            app = self._get_app()
+            if app:
+                app.show_toast(f'责令整改已归档（编号{cid}）', 'success')
+            self._rectify_photo_paths = []
+            self._show_rectify_content()
 
     def _build_archived_list(self, case_type):
         """从SQLite读取归档列表"""
@@ -374,16 +505,25 @@ class CaseScreen(Screen):
         item.bind(pos=self._refresh_item_bg,
                   size=self._refresh_item_bg)
 
+        case_type = case.get('case_type', '')
         case_num = case.get('case_number', '无编号')
         party = case.get('party_name', '') or '无当事人'
         created = case.get('created_at', '')
+        violation = case.get('violation_fact', '')
 
         info_box = BoxLayout(
             orientation='vertical',
             size_hint=(0.7, 1),
         )
+        if case_type == 'rectify':
+            first_line = f'{party}'
+            second_line = f'{violation[:20]}{"..." if len(violation) > 20 else ""} | {created}'
+        else:
+            first_line = f'编号: {case_num}'
+            second_line = f'{party} | {created}'
+
         num_lbl = Label(
-            text=f'编号: {case_num}',
+            text=first_line,
             font_size=sp(12),
             color=COLORS['text_primary'],
             size_hint=(1, 0.5),
@@ -394,7 +534,7 @@ class CaseScreen(Screen):
             shorten=True,
         )
         meta_lbl = Label(
-            text=f'{party} | {created}',
+            text=second_line,
             font_size=sp(10),
             color=COLORS['text_secondary'],
             size_hint=(1, 0.5),
@@ -438,16 +578,31 @@ class CaseScreen(Screen):
         )
         content.bind(minimum_height=content.setter('height'))
 
-        fields = [
-            ('案件编号', case.get('case_number', '')),
-            ('案件类型', '扣单管理' if case.get('case_type') == 'deduction' else '责令整改'),
-            ('编号范围', f"{case.get('number_range_start', '')} - {case.get('number_range_end', '')}"),
-            ('当事人', case.get('party_name', '')),
-            ('违法事实', case.get('violation_fact', '')),
-            ('OCR识别结果', case.get('ocr_result', '')),
-            ('状态', case.get('status', '')),
-            ('创建时间', case.get('created_at', '')),
-        ]
+        case_type = case.get('case_type', '')
+        if case_type == 'rectify':
+            fields = [
+                ('案件编号', case.get('case_number', '')),
+                ('案件类型', '责令整改'),
+                ('当事人', case.get('party_name', '')),
+                ('联系电话', case.get('party_phone', '')),
+                ('联系地址', case.get('party_address', '')),
+                ('违法事实', case.get('violation_fact', '')),
+                ('整改要求', case.get('rectify_requirements', '')),
+                ('整改期限', case.get('rectify_deadline', '')),
+                ('状态', case.get('status', '')),
+                ('创建时间', case.get('created_at', '')),
+            ]
+        else:
+            fields = [
+                ('案件编号', case.get('case_number', '')),
+                ('案件类型', '扣单管理'),
+                ('编号范围', f"{case.get('number_range_start', '')} - {case.get('number_range_end', '')}"),
+                ('当事人', case.get('party_name', '')),
+                ('违法事实', case.get('violation_fact', '')),
+                ('OCR识别结果', case.get('ocr_result', '')),
+                ('状态', case.get('status', '')),
+                ('创建时间', case.get('created_at', '')),
+            ]
         for label, value in fields:
             row = BoxLayout(orientation='vertical', size_hint=(1, None), spacing=dp(2))
             name_lbl = Label(
@@ -528,19 +683,6 @@ class CaseScreen(Screen):
             height=dp(32),
             halign='left',
             valign='middle',
-            text_size=(self.width - dp(32), None),
-        )
-        self.content.add_widget(lbl)
-
-    def _add_info_label(self, text):
-        lbl = Label(
-            text=text,
-            font_size=FONT_SIZES['small'],
-            color=COLORS['text_secondary'],
-            size_hint=(1, None),
-            height=dp(48),
-            halign='left',
-            valign='top',
             text_size=(self.width - dp(32), None),
         )
         self.content.add_widget(lbl)
@@ -704,11 +846,6 @@ class CaseScreen(Screen):
         """刷新已归档列表显示"""
         self._show_deduction_content()
 
-    def _on_submit(self, instance):
-        app = self._get_app()
-        if app:
-            app.show_toast('提交功能将在后续里程碑实现', 'info')
-
     def _on_export(self, instance):
         """导出按钮回调"""
         self._show_export_popup()
@@ -741,7 +878,7 @@ class CaseScreen(Screen):
                 font_size=FONT_SIZES['body'],
                 size_hint=(1, None),
                 height=dp(44),
-                background_color=COLORS['secondary'] if fmt_key != 'excel' else COLORS['primary'],
+                background_color=COLORS['primary_light'] if fmt_key != 'excel' else COLORS['primary'],
                 background_normal='',
                 color=[1, 1, 1, 1],
             )
@@ -802,6 +939,3 @@ class CaseScreen(Screen):
     def _get_app(self):
         from kivy.app import App
         return App.get_running_app()
-
-
-from kivy.clock import Clock

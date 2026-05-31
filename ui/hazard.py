@@ -24,7 +24,8 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.clock import Clock
 
-from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT
+from config import COLORS, FONT_SIZES, PAGE_TITLES, TOOLBAR_HEIGHT, SPACING, RADIUS, SHADOWS
+from ui.styles import toolbar_bg, primary_btn, secondary_btn
 from core.gps_map import GPSModule, OfflineGeocoder, OfflineMap
 from core.export import export_data, EXPORT_FORMATS
 
@@ -66,11 +67,7 @@ class HazardScreen(Screen):
             height=TOOLBAR_HEIGHT,
             padding=[dp(16), 0],
         )
-        with toolbar.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=toolbar.pos, size=toolbar.size)
-        toolbar.bind(pos=self._update_toolbar_bg,
-                     size=self._update_toolbar_bg)
+        toolbar_bg(toolbar)
 
         title_label = Label(
             text=PAGE_TITLES['hazard'],
@@ -140,7 +137,7 @@ class HazardScreen(Screen):
             font_size=sp(12),
             size_hint=(1, None),
             height=dp(36),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -257,7 +254,7 @@ class HazardScreen(Screen):
             text='选择照片',
             font_size=sp(12),
             size_hint=(0.35, 1),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -293,7 +290,6 @@ class HazardScreen(Screen):
             size_hint=(1, None),
             height=dp(120),
             multiline=True,
-            max_text_length=500,
             foreground_color=COLORS['text_primary'],
             background_color=[1, 1, 1, 1],
             padding=[dp(8), dp(8)],
@@ -320,7 +316,7 @@ class HazardScreen(Screen):
             font_size=FONT_SIZES['body'],
             size_hint=(1, None),
             height=dp(44),
-            background_color=COLORS['secondary'],
+            background_color=COLORS['primary_light'],
             background_normal='',
             color=[1, 1, 1, 1],
         )
@@ -650,12 +646,6 @@ class HazardScreen(Screen):
 
     # ==================== UI辅助方法 ====================
 
-    def _update_toolbar_bg(self, instance, value):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            Color(*COLORS['primary'])
-            Rectangle(pos=instance.pos, size=instance.size)
-
     def _add_section_title(self, content, text):
         """添加区域标题"""
         lbl = Label(
@@ -775,7 +765,7 @@ class HazardScreen(Screen):
                 font_size=FONT_SIZES['body'],
                 size_hint=(1, None),
                 height=dp(44),
-                background_color=COLORS['secondary'] if fmt_key != 'excel' else COLORS['primary'],
+                background_color=COLORS['primary_light'] if fmt_key != 'excel' else COLORS['primary'],
                 background_normal='',
                 color=[1, 1, 1, 1],
             )

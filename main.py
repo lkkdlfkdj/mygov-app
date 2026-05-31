@@ -18,6 +18,7 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 
 from config import APP_NAME, COLORS
+from core.permissions import request_all_permissions, get_permission_status_text, _ANDROID
 from core.storage import Storage
 from ui.toast import ToastWidget
 from ui.nav_bar import NavBar
@@ -110,9 +111,18 @@ class GovApp(App):
         self.toast = ToastWidget()
         Window.add_widget(self.toast)
 
+        # ---- 请求Android运行时权限 ----
+        if _ANDROID:
+            from kivy.clock import Clock
+            Clock.schedule_once(lambda dt: self._request_permissions(), 1.0)
+
         # ---- 创建主布局 ----
         main_layout = MainLayout(app_instance=self)
         return main_layout
+
+    def _request_permissions(self):
+        """应用启动时请求所有必需权限"""
+        request_all_permissions()
 
     def show_toast(self, message, toast_type='info', duration=2.0):
         """全局Toast通知方法

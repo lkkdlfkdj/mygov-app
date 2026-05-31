@@ -1,7 +1,10 @@
 name: Build Android APK
+
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
 jobs:
@@ -10,51 +13,64 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Cache Buildozer
+      - name: Cache Buildozer SDK/NDK
         uses: actions/cache@v4
         with:
-          path: ~/.buildozer
-          key: ${{ runner.os }}-buildozer-sdk-2
+          path: |
+            ~/.buildozer
+            !~/.buildozer/android/platform
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+
+      - name: Cache Android SDK platform
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer/android/platform
+          key: ${{ runner.os }}-android-sdk-${{ hashFiles('buildozer.spec') }}
 
       - name: Install system deps
         run: |
-          sudo apt update
+          sudo apt update -qq
           sudo apt install -y python3-pip python3-setuptools python3-dev \
             git zip unzip build-essential ccache autoconf libtool \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             libtinfo5 cmake libffi-dev libssl-dev libltdl-dev
 
-      - name: Install Buildozer
+      - name: Install Python build tools
         run: |
           pip install --upgrade pip setuptools wheel
           pip install buildozer cython virtualenv
 
       - name: Build APK
         run: |
-          python -m buildozer android debug 2>&1 | tee build_log.txt
+          export CCACHE_DIR=/tmp/ccache
+          python3 -m buildozer android debug 2>&1 | tee build_log.txt
 
-      - name: Upload APK
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: mygovapp-apk
           path: bin/*.apk
           if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload log on failure
+      - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build_log.txt
+          retention-days: 14
